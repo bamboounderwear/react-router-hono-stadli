@@ -1,7 +1,20 @@
 import { Link } from "react-router";
 
 import type { Route } from "./+types/shop";
-import { getShopItems } from "../data/club";
+
+type PublicProduct = {
+        id: string;
+        slug: string;
+        name: string;
+        description: string;
+        priceCents: number;
+        inventoryCount: number;
+        imageUrl: string;
+        colors: string[];
+        sizes: string[];
+        details: string[];
+        badge?: string;
+};
 
 export function meta({}: Route.MetaArgs) {
         return [
@@ -13,8 +26,25 @@ export function meta({}: Route.MetaArgs) {
         ];
 }
 
-export function loader() {
-        return { items: getShopItems() };
+export async function loader({ request }: Route.LoaderArgs) {
+        const response = await fetch(new URL("/api/public/products", request.url).toString());
+
+        if (!response.ok) {
+                throw new Response("Failed to load products", { status: response.status });
+        }
+
+        const payload = (await response.json()) as { products: PublicProduct[] };
+        const items = payload.products.map((product) => ({
+                id: product.id,
+                name: product.name,
+                description: product.description,
+                price: product.priceCents / 100,
+                imageUrl: product.imageUrl,
+                badge: product.badge,
+                inventoryCount: product.inventoryCount,
+        }));
+
+        return { items };
 }
 
 export default function Shop({ loaderData }: Route.ComponentProps) {
@@ -43,8 +73,16 @@ export default function Shop({ loaderData }: Route.ComponentProps) {
                                                         <div className="flex flex-1 flex-col justify-between p-6">
                                                                 <div>
                                                                         <p className="text-xs uppercase tracking-[0.3em] text-blue-300">Storm Authentics</p>
+                                                                        {item.badge && (
+                                                                                <span className="mt-2 inline-flex rounded-full border border-blue-400 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-blue-200">
+                                                                                        {item.badge}
+                                                                                </span>
+                                                                        )}
                                                                         <h2 className="mt-3 text-2xl font-semibold text-white">{item.name}</h2>
                                                                         <p className="mt-3 text-sm text-blue-100">{item.description}</p>
+                                                                        <p className="mt-3 text-xs uppercase tracking-[0.2em] text-blue-300">
+                                                                                {item.inventoryCount} in stock
+                                                                        </p>
                                                                 </div>
                                                                 <div className="mt-6 flex items-center justify-between">
                                                                         <p className="text-lg font-semibold text-blue-200">CHF {item.price.toFixed(0)}</p>

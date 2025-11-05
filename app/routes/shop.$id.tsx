@@ -2,12 +2,25 @@ import { useEffect, useRef } from "react";
 import { Form, Link } from "react-router";
 
 import type { Route } from "./+types/shop.$id";
-import { getShopItem } from "../data/club";
 import { useCart } from "../lib/cart-context";
 
 type SubmissionResult =
-        | { success: boolean; size?: string; color?: string; quantity?: number; error?: string }
+        | { success: true; size: string; color: string; quantity: number; message: string; available: number }
+        | { success: false; error: string; available?: number }
         | undefined;
+
+type PublicProduct = {
+        id: string;
+        name: string;
+        description: string;
+        priceCents: number;
+        inventoryCount: number;
+        imageUrl: string;
+        colors: string[];
+        sizes: string[];
+        details: string[];
+        badge?: string;
+};
 
 export function meta({ data }: Route.MetaArgs) {
         const item = data?.item;
@@ -24,18 +37,39 @@ export function meta({ data }: Route.MetaArgs) {
         ];
 }
 
-export function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
         const { id } = params;
         if (!id) {
                 throw new Response("Not found", { status: 404 });
         }
 
-        const item = getShopItem(id);
-        if (!item) {
+        const response = await fetch(new URL(`/api/public/products/${id}`, request.url).toString());
+
+        if (response.status === 404) {
                 throw new Response("Not found", { status: 404 });
         }
 
-        return { item } as const;
+        if (!response.ok) {
+                throw new Response("Failed to load product", { status: response.status });
+        }
+
+        const payload = (await response.json()) as { product: PublicProduct };
+        const product = payload.product;
+
+        return {
+                item: {
+                        id: product.id,
+                        name: product.name,
+                        description: product.description,
+                        price: product.priceCents / 100,
+                        imageUrl: product.imageUrl,
+                        colors: product.colors,
+                        sizes: product.sizes,
+                        details: product.details,
+                        inventoryCount: product.inventoryCount,
+                        badge: product.badge,
+                },
+        } as const;
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -52,11 +86,60 @@ export async function action({ request }: Route.ActionArgs) {
                 return { success: false, error: "Quantity must be at least one." } as const;
         }
 
-        return { success: true, size, color, quantity } as const;
+        const productId = formData.get("productId") as string | null;
+        if (!productId) {
+                return { success: false, error: "Missing product identifier." } as const;
+        }
+
+        const response = await fetch(new URL(`/api/public/products/${productId}/validate`, request.url).toString(), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ quantity }),
+        });
+
+        if (!response.ok) {
+                const errorPayload = await response.json().catch(() => ({ error: "Unable to validate inventory." }));
+                const message = typeof (errorPayload as { error?: unknown }).error === "string"
+                        ? (errorPayload as { error: string }).error
+                        : "Unable to validate inventory.";
+                return { success: false, error: message } as const;
+        }
+
+        const payload = (await response.json()) as { success: boolean; error?: string; available?: number };
+
+        if (!payload.success) {
+                return {
+                        success: false,
+                        error: payload.error ?? "Requested quantity exceeds inventory.",
+                        available: payload.available,
+                } as const;
+        }
+
+        return {
+                success: true,
+                size,
+                color,
+                quantity,
+                message: `Added ${quantity} × ${size} / ${color} to your cart.`,
+                available: payload.available ?? quantity,
+        } as const;
 }
 
 export default function ShopItemDetail({ loaderData, actionData }: Route.ComponentProps) {
-        const { item } = loaderData;
+        const { item } = loaderData as {
+                item: {
+                        id: string;
+                        name: string;
+                        description: string;
+                        price: number;
+                        imageUrl: string;
+                        colors: string[];
+                        sizes: string[];
+                        details: string[];
+                        inventoryCount: number;
+                        badge?: string;
+                };
+        };
         const submission = actionData as SubmissionResult;
         const { addItem } = useCart();
         const lastSubmissionRef = useRef<SubmissionResult>(undefined);
@@ -95,10 +178,19 @@ export default function ShopItemDetail({ loaderData, actionData }: Route.Compone
                                         </div>
                                         <aside className="rounded-3xl border border-slate-800 bg-slate-900/70 p-8 text-sm text-blue-100">
                                                 <p className="text-xs uppercase tracking-[0.3em] text-blue-300">Storm Authentics</p>
+                                                {item.badge && (
+                                                        <span className="mt-2 inline-flex rounded-full border border-blue-400 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-blue-200">
+                                                                {item.badge}
+                                                        </span>
+                                                )}
                                                 <h1 className="mt-3 text-3xl font-semibold text-white">{item.name}</h1>
                                                 <p className="mt-4 text-base">{item.description}</p>
                                                 <p className="mt-6 text-3xl font-bold text-blue-200">CHF {item.price.toFixed(0)}</p>
+                                                <p className="mt-2 text-xs uppercase tracking-[0.2em] text-blue-300">
+                                                        {item.inventoryCount} in stock
+                                                </p>
                                                 <Form method="post" className="mt-8 space-y-6">
+                                                        <input type="hidden" name="productId" value={item.id} />
                                                         <div>
                                                                 <label htmlFor="size" className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-300">
                                                                         Size
@@ -163,12 +255,21 @@ export default function ShopItemDetail({ loaderData, actionData }: Route.Compone
                                                                 ))}
                                                         </ul>
                                                         {submission?.success && (
-                                                                <p className="text-xs text-blue-200">
-                                                                        Added {submission.quantity} × {item.name} ({submission.size} / {submission.color}) to your cart.
-                                                                </p>
+                                                                <div className="text-xs text-blue-200">
+                                                                        <p>{submission.message}</p>
+                                                                        <p className="mt-1">Current inventory: {submission.available} units remaining.</p>
+                                                                </div>
                                                         )}
                                                         {submission && !submission.success && submission.error && (
-                                                                <p className="text-xs text-red-300">{submission.error}</p>
+                                                                <p className="text-xs text-red-300">
+                                                                        {submission.error}
+                                                                        {typeof submission.available === "number" && submission.available >= 0 && (
+                                                                                <span>
+                                                                                        {" "}
+                                                                                        • {submission.available} remaining
+                                                                                </span>
+                                                                        )}
+                                                                </p>
                                                         )}
                                                 </Form>
                                         </aside>

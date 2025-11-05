@@ -21,6 +21,50 @@ export type EditorialEntry = {
         audience: string;
 };
 
+export type PublicNewsArticle = {
+        id: number;
+        slug: string;
+        title: string;
+        summary: string;
+        content: string;
+        category: string;
+        publishedAt: number;
+        imageUrl: string;
+        author: string;
+};
+
+const NEWS_IMAGES = [
+        "https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?auto=format&fit=crop&w=1400&q=80",
+        "https://images.unsplash.com/photo-1461897104016-0b3b00cc81ee?auto=format&fit=crop&w=1400&q=80",
+        "https://images.unsplash.com/photo-1521412644187-c49fa049e84d?auto=format&fit=crop&w=1400&q=80",
+        "https://images.unsplash.com/photo-1530543787849-128d94430c6b?auto=format&fit=crop&w=1400&q=80",
+        "https://images.unsplash.com/photo-1522770179533-24471fcdba45?auto=format&fit=crop&w=1400&q=80",
+];
+
+const NEWS_CATEGORIES = ["Matchday", "Club", "Community", "Academy", "Analysis"];
+const NEWS_AUTHORS = ["Stadli Communications", "Lina Schneider", "Ava Hart", "Suri Das", "Jules Meyer"];
+
+function mapToPublicArticle(entry: NewsEntry): PublicNewsArticle {
+        const index = Math.abs(entry.id) % NEWS_IMAGES.length;
+        const category = NEWS_CATEGORIES[Math.abs(entry.id) % NEWS_CATEGORIES.length];
+        const author = NEWS_AUTHORS[Math.abs(entry.id) % NEWS_AUTHORS.length];
+        const publishedAt = entry.publishedAt ?? entry.updatedAt ?? entry.createdAt;
+        const summary = entry.excerpt?.trim() ?? "Club insiders provide fresh perspective ahead of kickoff.";
+        const content = entry.content?.trim() ?? `${summary}\n\nThe Stadli Storm continue to push the tempo across the club. Expect further updates as the week progresses.`;
+
+        return {
+                id: entry.id,
+                slug: entry.slug,
+                title: entry.title,
+                summary,
+                content,
+                category,
+                publishedAt,
+                imageUrl: NEWS_IMAGES[index],
+                author,
+        };
+}
+
 const OWNER_ROTATION = ["Lina Schneider", "Ava Hart", "Zuri Adebayo", "Ivy Watts"];
 const AUDIENCE_ROTATION = ["Global", "Ticket holders", "Media list", "Subscribers"];
 
@@ -70,6 +114,14 @@ export async function getNewsEntryBySlug(db: StadliDb, slug: string) {
         return mapToEditorial(row);
 }
 
+export async function listPublicNewsArticles(db: StadliDb) {
+        const rows = await db.all<NewsEntry>(
+                "SELECT id, slug, title, excerpt, content, published_at as publishedAt, created_at as createdAt, updated_at as updatedAt FROM news_posts ORDER BY COALESCE(published_at, updated_at) DESC",
+        );
+
+        return rows.map((row) => mapToPublicArticle(row));
+}
+
 export async function updateNewsEntry(db: StadliDb, slug: string, updates: Partial<{ title: string; summary: string; status: EditorialEntry["status"] }>) {
         const existing = await db.get<NewsEntry>(
                 "SELECT id, slug, title, excerpt, content, published_at as publishedAt, created_at as createdAt, updated_at as updatedAt FROM news_posts WHERE slug = ?",
@@ -109,6 +161,19 @@ export async function updateNewsEntry(db: StadliDb, slug: string, updates: Parti
         );
 
         return getNewsEntryBySlug(db, slug);
+}
+
+export async function getPublicNewsArticle(db: StadliDb, slug: string) {
+        const row = await db.get<NewsEntry>(
+                "SELECT id, slug, title, excerpt, content, published_at as publishedAt, created_at as createdAt, updated_at as updatedAt FROM news_posts WHERE slug = ?",
+                [slug],
+        );
+
+        if (!row) {
+                return null;
+        }
+
+        return mapToPublicArticle(row);
 }
 
 export async function createNewsEntry(db: StadliDb, entry: { title: string; slug: string; summary?: string | null; content?: string | null; publishedAt?: number | null }) {

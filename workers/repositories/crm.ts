@@ -32,6 +32,14 @@ export type PipelineStage = {
         delta: number;
 };
 
+export type Customer = {
+        id: number;
+        firstName: string | null;
+        lastName: string | null;
+        email: string;
+        phone: string | null;
+};
+
 const STAGE_BY_STATUS: Record<string, string> = {
         available: "Qualification",
         reserved: "Negotiation",
@@ -66,6 +74,62 @@ function pickOwner(customerId: number) {
 
 function centsToValue(cents: number | null | undefined) {
         return Math.round((cents ?? 0) / 100);
+}
+
+function normaliseEmail(email: string) {
+        return email.trim().toLowerCase();
+}
+
+export async function findCustomerByEmail(db: StadliDb, email: string) {
+        const row = await db.get<Customer>(
+                "SELECT id, first_name as firstName, last_name as lastName, email, phone FROM customers WHERE lower(email) = ?",
+                [normaliseEmail(email)],
+        );
+
+        return row ?? null;
+}
+
+export async function upsertCustomer(
+        db: StadliDb,
+        payload: { firstName?: string | null; lastName?: string | null; email: string; phone?: string | null },
+) {
+        const email = normaliseEmail(payload.email);
+
+        if (!email) {
+                throw new Error("Customer email is required");
+        }
+
+        const existing = await findCustomerByEmail(db, email);
+
+        if (existing) {
+                const nextFirst = payload.firstName ?? existing.firstName;
+                const nextLast = payload.lastName ?? existing.lastName;
+                const nextPhone = payload.phone ?? existing.phone;
+
+                if (nextFirst !== existing.firstName || nextLast !== existing.lastName || nextPhone !== existing.phone) {
+                        await db.run(
+                                "UPDATE customers SET first_name = ?, last_name = ?, phone = ?, updated_at = ? WHERE id = ?",
+                                [nextFirst, nextLast, nextPhone, Date.now(), existing.id],
+                        );
+
+                        return { ...existing, firstName: nextFirst, lastName: nextLast, phone: nextPhone } satisfies Customer;
+                }
+
+                return existing;
+        }
+
+        await db.run(
+                "INSERT INTO customers (first_name, last_name, email, phone, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                [payload.firstName ?? null, payload.lastName ?? null, email, payload.phone ?? null, Date.now(), Date.now()],
+        );
+
+        const created = await findCustomerByEmail(db, email);
+
+        if (!created) {
+                throw new Error("Failed to create customer");
+        }
+
+        return created;
 }
 
 function mapContact(row: ContactRecord): CrmContact {

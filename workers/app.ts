@@ -4,9 +4,20 @@ import type { Context, MiddlewareHandler } from "hono";
 import { createRequestHandler } from "react-router";
 
 import { getDb } from "./db/client";
-import { getNewsEntryBySlug, listNewsEntries, updateNewsEntry } from "./repositories/content";
-import { getPipelineSummary, listContacts } from "./repositories/crm";
-import { assignTicketCustomer, getSectionAvailabilityForGame, listGames, listTicketsForGame, updateTicketStatus } from "./repositories/ticketing";
+import { getNewsEntryBySlug, getPublicNewsArticle, listNewsEntries, listPublicNewsArticles, updateNewsEntry } from "./repositories/content";
+import { getPipelineSummary, listContacts, upsertCustomer } from "./repositories/crm";
+import {
+        assignTicketCustomer,
+        getPublicGame,
+        getSectionAvailabilityForGame,
+        listGames,
+        listPublicGames,
+        listTicketsForGame,
+        reserveTicketsForGame,
+        summariseAvailability,
+        updateTicketStatus,
+} from "./repositories/ticketing";
+import { getPublicProductBySlug, listPublicProducts } from "./repositories/products";
 import { buildAnalyticsOverview, buildAnalyticsSummary } from "./services/analytics";
 
 type Bindings = {
@@ -43,11 +54,172 @@ const SESSION_MAX_AGE = 60 * 60 * 24; // 24 hours
 const DEFAULT_SESSION_SECRET = "stadli-admin-secret";
 
 const app = new Hono<AppContext>();
+const publicApp = new Hono<AppContext>();
 const authApp = new Hono<AppContext>();
 const analyticsApp = new Hono<AppContext>();
 const crmApp = new Hono<AppContext>();
 const contentApp = new Hono<AppContext>();
 const ticketingApp = new Hono<AppContext>();
+
+publicApp.get("/games", async (c) => {
+        const db = getDb(c.env.stadlidb);
+        const games = await listPublicGames(db);
+        const gamesWithAvailability = await Promise.all(
+                games.map(async (game) => {
+                        const sections = await getSectionAvailabilityForGame(db, game.id);
+                        const seatSummary = summariseAvailability(sections);
+
+                        return { ...game, seatSummary };
+                }),
+        );
+
+        return c.json({ games: gamesWithAvailability });
+});
+
+publicApp.get("/games/:id", async (c) => {
+        const id = Number.parseInt(c.req.param("id"), 10);
+
+        if (Number.isNaN(id)) {
+                return c.json({ error: "Invalid game id" }, 400);
+        }
+
+        const db = getDb(c.env.stadlidb);
+        const game = await getPublicGame(db, id);
+
+        if (!game) {
+                return c.json({ error: "Game not found" }, 404);
+        }
+
+        const sections = await getSectionAvailabilityForGame(db, id);
+        const seatSummary = summariseAvailability(sections);
+
+        return c.json({ game: { ...game, seatSummary }, sections });
+});
+
+publicApp.post("/games/:id/ticket-requests", async (c) => {
+        const id = Number.parseInt(c.req.param("id"), 10);
+
+        if (Number.isNaN(id)) {
+                return c.json({ error: "Invalid game id" }, 400);
+        }
+
+        const payload = await c.req.json().catch(() => ({})) as { name?: string; email?: string; seats?: number };
+        const name = typeof payload.name === "string" ? payload.name.trim() : "";
+        const email = typeof payload.email === "string" ? payload.email.trim() : "";
+        const seatsRequestedRaw = typeof payload.seats === "number" ? payload.seats : Number.parseInt(String(payload.seats ?? ""), 10);
+        const seatsRequested = Number.isNaN(seatsRequestedRaw) ? 1 : Math.min(Math.max(seatsRequestedRaw, 1), 6);
+
+        if (!name || !email) {
+                return c.json({ success: false, error: "Name and email are required." });
+        }
+
+        const db = getDb(c.env.stadlidb);
+        const game = await getPublicGame(db, id);
+
+        if (!game) {
+                return c.json({ success: false, error: "Game not found." }, 404);
+        }
+
+        const sectionsBefore = await getSectionAvailabilityForGame(db, id);
+        const summaryBefore = summariseAvailability(sectionsBefore);
+
+        if (summaryBefore.availableSeats <= 0) {
+                return c.json({
+                        success: false,
+                        error: "This fixture is currently sold out.",
+                        seatSummary: summaryBefore,
+                        sections: sectionsBefore,
+                });
+        }
+
+        const supporterName = splitSupporterName(name);
+        const customer = await upsertCustomer(db, { firstName: supporterName.firstName, lastName: supporterName.lastName, email });
+        const reservation = await reserveTicketsForGame(db, id, customer.id, seatsRequested);
+        const sectionsAfter = await getSectionAvailabilityForGame(db, id);
+        const seatSummary = summariseAvailability(sectionsAfter);
+
+        const success = reservation.reserved >= seatsRequested;
+        let message = success
+                ? `Reserved ${reservation.reserved} seats for ${name}.`
+                : reservation.reserved > 0
+                        ? `Reserved ${reservation.reserved} seats. ${seatSummary.availableSeats} remain available.`
+                        : `Unable to reserve seats at this time. ${seatSummary.availableSeats} remain available.`;
+
+        return c.json({
+                success,
+                reserved: reservation.reserved,
+                requested: reservation.requested,
+                message,
+                seatSummary,
+                sections: sectionsAfter,
+        });
+});
+
+publicApp.get("/news", async (c) => {
+        const db = getDb(c.env.stadlidb);
+        const articles = await listPublicNewsArticles(db);
+
+        return c.json({ articles });
+});
+
+publicApp.get("/news/:slug", async (c) => {
+        const slug = c.req.param("slug");
+        const db = getDb(c.env.stadlidb);
+        const article = await getPublicNewsArticle(db, slug);
+
+        if (!article) {
+                return c.json({ error: "Article not found" }, 404);
+        }
+
+        return c.json({ article });
+});
+
+publicApp.get("/products", async (c) => {
+        const db = getDb(c.env.stadlidb);
+        const products = await listPublicProducts(db);
+
+        return c.json({ products });
+});
+
+publicApp.get("/products/:slug", async (c) => {
+        const slug = c.req.param("slug");
+        const db = getDb(c.env.stadlidb);
+        const product = await getPublicProductBySlug(db, slug);
+
+        if (!product) {
+                return c.json({ error: "Product not found" }, 404);
+        }
+
+        return c.json({ product });
+});
+
+publicApp.post("/products/:slug/validate", async (c) => {
+        const slug = c.req.param("slug");
+        const db = getDb(c.env.stadlidb);
+        const product = await getPublicProductBySlug(db, slug);
+
+        if (!product) {
+                return c.json({ error: "Product not found" }, 404);
+        }
+
+        const payload = await c.req.json().catch(() => ({})) as { quantity?: number };
+        const quantityRaw = typeof payload.quantity === "number" ? payload.quantity : Number.parseInt(String(payload.quantity ?? ""), 10);
+        const quantity = Number.isNaN(quantityRaw) ? 0 : quantityRaw;
+
+        if (quantity <= 0) {
+                return c.json({ success: false, error: "Quantity must be at least one.", available: product.inventoryCount });
+        }
+
+        if (quantity > product.inventoryCount) {
+                return c.json({
+                        success: false,
+                        error: `Only ${product.inventoryCount} in stock.`,
+                        available: product.inventoryCount,
+                });
+        }
+
+        return c.json({ success: true, available: product.inventoryCount });
+});
 
 authApp.post("/login", async (c) => {
         const credentials = await c.req.json().catch(() => ({})) as { username?: string; password?: string };
@@ -252,6 +424,7 @@ app.route("/api/analytics", analyticsApp);
 app.route("/api/content", contentApp);
 app.route("/api/crm", crmApp);
 app.route("/api/ticketing", ticketingApp);
+app.route("/api/public", publicApp);
 
 app.get("*", (c) => {
         const requestHandler = createRequestHandler(
@@ -265,6 +438,26 @@ app.get("*", (c) => {
 });
 
 export default app;
+
+function splitSupporterName(name: string) {
+        const parts = name
+                .split(/\s+/)
+                .map((part) => part.trim())
+                .filter(Boolean);
+
+        if (parts.length === 0) {
+                return { firstName: null as string | null, lastName: null as string | null };
+        }
+
+        if (parts.length === 1) {
+                return { firstName: parts[0], lastName: null as string | null };
+        }
+
+        return {
+                firstName: parts[0],
+                lastName: parts.slice(1).join(" ") || null,
+        };
+}
 
 async function getSession(c: Context<AppContext>): Promise<Session | null> {
         const cookieHeader = c.req.header("Cookie") ?? c.req.header("cookie") ?? null;
