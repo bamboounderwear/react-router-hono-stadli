@@ -6,4 +6,11 @@ export default [
         route("news", "routes/news.tsx", [route(":slug", "routes/news.$slug.tsx")]),
         route("games", "routes/games.tsx", [route(":id", "routes/games.$id.tsx")]),
         route("shop", "routes/shop.tsx", [route(":id", "routes/shop.$id.tsx")]),
+        route("admin/login", "routes/admin/login.tsx"),
+        route("admin", "routes/admin/_layout.tsx", [
+                index("routes/admin/dashboard.tsx"),
+                route("content", "routes/admin/content.tsx"),
+                route("analytics", "routes/admin/analytics.tsx"),
+                route("crm", "routes/admin/crm.tsx"),
+        ]),
 ] satisfies RouteConfig;
