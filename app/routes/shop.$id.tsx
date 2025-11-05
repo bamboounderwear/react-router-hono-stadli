@@ -1,7 +1,13 @@
+import { useEffect, useRef } from "react";
 import { Form, Link } from "react-router";
 
 import type { Route } from "./+types/shop.$id";
 import { getShopItem } from "../data/club";
+import { useCart } from "../lib/cart-context";
+
+type SubmissionResult =
+        | { success: boolean; size?: string; color?: string; quantity?: number; error?: string }
+        | undefined;
 
 export function meta({ data }: Route.MetaArgs) {
         const item = data?.item;
@@ -51,7 +57,31 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function ShopItemDetail({ loaderData, actionData }: Route.ComponentProps) {
         const { item } = loaderData;
-        const submission = actionData as { success: boolean; size?: string; color?: string; quantity?: number; error?: string } | undefined;
+        const submission = actionData as SubmissionResult;
+        const { addItem } = useCart();
+        const lastSubmissionRef = useRef<SubmissionResult>(undefined);
+
+        useEffect(() => {
+                if (!submission?.success) {
+                        lastSubmissionRef.current = submission;
+                        return;
+                }
+
+                if (lastSubmissionRef.current === submission) {
+                        return;
+                }
+
+                addItem({
+                        id: item.id,
+                        name: item.name,
+                        price: item.price,
+                        quantity: submission.quantity ?? 1,
+                        size: submission.size,
+                        color: submission.color,
+                });
+
+                lastSubmissionRef.current = submission;
+        }, [submission, addItem, item.id, item.name, item.price]);
 
         return (
                 <div className="bg-slate-950 text-slate-50">
