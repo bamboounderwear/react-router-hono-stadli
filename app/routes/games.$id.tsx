@@ -1,7 +1,36 @@
 import { Form, Link } from "react-router";
 
 import type { Route } from "./+types/games.$id";
-import { getGame } from "../data/club";
+
+type GameSeatSummary = {
+        totalSeats: number;
+        availableSeats: number;
+        reservedSeats: number;
+        soldSeats: number;
+};
+
+type SectionAvailability = {
+        section: string;
+        totalSeats: number;
+        availableSeats: number;
+        reservedSeats: number;
+        soldSeats: number;
+};
+
+type PublicGame = {
+        id: number;
+        opponent: string;
+        venue: string;
+        date: string;
+        status: "upcoming" | "final";
+        heroImage: string;
+        highlights: string[];
+        description?: string | null;
+        recap?: string | null;
+        score?: string | null;
+        isHome: boolean;
+        seatSummary: GameSeatSummary;
+};
 
 export function meta({ data }: Route.MetaArgs) {
         const game = data?.game;
@@ -25,21 +54,62 @@ export function meta({ data }: Route.MetaArgs) {
         ];
 }
 
-export function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
         const { id } = params;
         if (!id) {
                 throw new Response("Not found", { status: 404 });
         }
 
-        const game = getGame(id);
-        if (!game) {
+        const response = await fetch(new URL(`/api/public/games/${id}`, request.url).toString());
+
+        if (response.status === 404) {
                 throw new Response("Not found", { status: 404 });
         }
 
-        return { game } as const;
+        if (!response.ok) {
+                throw new Response("Failed to load game", { status: response.status });
+        }
+
+        const payload = (await response.json()) as { game: PublicGame; sections: SectionAvailability[] };
+
+        return payload;
 }
 
-export async function action({ request }: Route.ActionArgs) {
+type SubmissionSuccess = {
+        success: true;
+        name: string;
+        seats: number;
+        message: string;
+        seatSummary: GameSeatSummary;
+        sections: SectionAvailability[];
+};
+
+type SubmissionError = {
+        success: false;
+        error: string;
+        seatSummary?: GameSeatSummary;
+        sections?: SectionAvailability[];
+};
+
+type SubmissionResult = SubmissionSuccess | SubmissionError;
+
+function normalizeSeatSummary(summary?: GameSeatSummary) {
+        return (
+                summary ?? {
+                        totalSeats: 0,
+                        availableSeats: 0,
+                        reservedSeats: 0,
+                        soldSeats: 0,
+                }
+        );
+}
+
+export async function action({ request, params }: Route.ActionArgs) {
+        const { id } = params;
+        if (!id) {
+                return { success: false, error: "Missing match identifier." } satisfies SubmissionError;
+        }
+
         const formData = await request.formData();
         const name = (formData.get("name") as string | null)?.trim();
         const email = (formData.get("email") as string | null)?.trim();
@@ -49,19 +119,71 @@ export async function action({ request }: Route.ActionArgs) {
                 return {
                         success: false,
                         error: "Name and email are required.",
-                } as const;
+                } satisfies SubmissionError;
         }
+
+        const seatCount = Number.parseInt(seats ?? "2", 10);
+        const quantity = Number.isNaN(seatCount) ? 2 : Math.min(Math.max(seatCount, 1), 6);
+
+        const response = await fetch(new URL(`/api/public/games/${id}/ticket-requests`, request.url).toString(), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name, email, seats: quantity }),
+        });
+
+        if (!response.ok) {
+            const errorPayload = (await response.json().catch(() => ({ error: "Unable to request tickets." }))) as {
+                    error?: string;
+                    seatSummary?: GameSeatSummary;
+                    sections?: SectionAvailability[];
+            };
+
+                const message = typeof errorPayload.error === "string" ? errorPayload.error : "Unable to request tickets.";
+
+                return {
+                        success: false,
+                        error: message,
+                        seatSummary: normalizeSeatSummary(errorPayload.seatSummary),
+                        sections: errorPayload.sections,
+                } satisfies SubmissionError;
+        }
+
+        const payload = (await response.json()) as {
+                success: boolean;
+                message?: string;
+                error?: string;
+                reserved?: number;
+                requested?: number;
+                seatSummary?: GameSeatSummary;
+                sections?: SectionAvailability[];
+        };
+
+        if (!payload.success) {
+                return {
+                        success: false,
+                        error: payload.error ?? payload.message ?? "Unable to reserve seats.",
+                        seatSummary: normalizeSeatSummary(payload.seatSummary),
+                        sections: payload.sections,
+                } satisfies SubmissionError;
+        }
+
+        const reserved = payload.reserved ?? quantity;
 
         return {
                 success: true,
                 name,
-                seats: seats || "2",
-        } as const;
+                seats: reserved,
+                message: payload.message ?? `Reserved ${reserved} seats for ${name}.`,
+                seatSummary: normalizeSeatSummary(payload.seatSummary),
+                sections: payload.sections ?? [],
+        } satisfies SubmissionSuccess;
 }
 
 export default function GameDetail({ loaderData, actionData }: Route.ComponentProps) {
-        const { game } = loaderData;
-        const submission = actionData as { success: boolean; name?: string; seats?: string; error?: string } | undefined;
+        const { game, sections } = loaderData as { game: PublicGame; sections: SectionAvailability[] };
+        const submission = actionData as SubmissionResult | undefined;
+        const activeSections = submission?.sections ?? sections;
+        const seatSummary = submission?.seatSummary ?? game.seatSummary;
 
         return (
                 <div className="bg-slate-950 text-slate-50">
@@ -128,6 +250,22 @@ export default function GameDetail({ loaderData, actionData }: Route.ComponentPr
                                                 ) : (
                                                         <>
                                                                 <p className="mt-4">Secure your spot in the Tempest supporters section before it sells out.</p>
+                                                                <div className="mt-4 rounded-2xl border border-blue-500/40 bg-slate-950/40 p-4 text-xs text-blue-200">
+                                                                        <p className="font-semibold uppercase tracking-[0.2em] text-blue-300">Seat availability</p>
+                                                                        <p className="mt-2 text-sm text-blue-100">
+                                                                                {seatSummary.availableSeats} available • {seatSummary.reservedSeats} reserved • {seatSummary.soldSeats} sold
+                                                                        </p>
+                                                                        <ul className="mt-4 space-y-2">
+                                                                                {activeSections.map((section) => (
+                                                                                        <li key={section.section} className="flex items-center justify-between text-xs">
+                                                                                                <span className="font-medium text-white">{section.section}</span>
+                                                                                                <span>
+                                                                                                        {section.availableSeats} / {section.totalSeats} available
+                                                                                                </span>
+                                                                                        </li>
+                                                                                ))}
+                                                                        </ul>
+                                                                </div>
                                                                 <Form method="post" className="mt-6 space-y-4">
                                                                         <div>
                                                                                 <label htmlFor="name" className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-300">
@@ -175,9 +313,7 @@ export default function GameDetail({ loaderData, actionData }: Route.ComponentPr
                                                                                 Request tickets
                                                                         </button>
                                                                         {submission?.success && (
-                                                                                <p className="text-xs text-blue-200">
-                                                                                        Thanks {submission.name}! A representative will contact you about {submission.seats} seats in the Tempest section.
-                                                                                </p>
+                                                                                <p className="text-xs text-blue-200">{submission.message}</p>
                                                                         )}
                                                                         {submission && !submission.success && submission.error && (
                                                                                 <p className="text-xs text-red-300">{submission.error}</p>

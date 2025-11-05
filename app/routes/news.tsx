@@ -1,7 +1,17 @@
 import { Link } from "react-router";
 
 import type { Route } from "./+types/news";
-import { getNewsArticles } from "../data/club";
+
+type PublicArticle = {
+        slug: string;
+        title: string;
+        summary: string;
+        content: string;
+        category: string;
+        publishedAt: number;
+        imageUrl: string;
+        author: string;
+};
 
 export function meta({}: Route.MetaArgs) {
         return [
@@ -13,16 +23,27 @@ export function meta({}: Route.MetaArgs) {
         ];
 }
 
-export function loader() {
-        const articles = [...getNewsArticles()].sort(
-                (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
-        );
+export async function loader({ request }: Route.LoaderArgs) {
+        const response = await fetch(new URL("/api/public/news", request.url).toString());
+
+        if (!response.ok) {
+                throw new Response("Failed to load articles", { status: response.status });
+        }
+
+        const payload = (await response.json()) as { articles: PublicArticle[] };
+        const articles = payload.articles
+                .map((article) => ({
+                        ...article,
+                        publishedAt: new Date(article.publishedAt).toISOString(),
+                }))
+                .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
         return { articles };
 }
 
 export default function News({ loaderData }: Route.ComponentProps) {
         const { articles } = loaderData;
+        const fallbackImage = "https://images.unsplash.com/photo-1522770179533-24471fcdba45?auto=format&fit=crop&w=1400&q=80";
 
         return (
                 <div className="bg-slate-950 text-slate-50">
@@ -43,7 +64,7 @@ export default function News({ loaderData }: Route.ComponentProps) {
                                                         <article key={article.slug} className="rounded-3xl border border-slate-800 bg-slate-900/70">
                                                                 <div
                                                                         className="h-64 w-full rounded-t-3xl bg-cover bg-center"
-                                                                        style={{ backgroundImage: `url(${article.imageUrl})` }}
+                                                                        style={{ backgroundImage: `url(${article.imageUrl || fallbackImage})` }}
                                                                 />
                                                                 <div className="p-8">
                                                                         <p className="text-xs uppercase tracking-[0.3em] text-blue-300">
