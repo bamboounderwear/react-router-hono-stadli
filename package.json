@@ -17,7 +17,7 @@
 		"publish": true
 	},
         "dependencies": {
-                "drizzle-orm": "^0.38.0",
+                "drizzle-orm": "file:vendor/drizzle-orm",
                 "hono": "4.8.2",
                 "isbot": "5.1.26",
                 "react": "19.0.0",
@@ -32,7 +32,6 @@
                 "@types/node": "24.0.4",
                 "@types/react": "19.0.10",
                 "@types/react-dom": "19.0.4",
-                "drizzle-kit": "^0.30.0",
                 "tailwindcss": "4.1.1",
                 "typescript": "5.8.3",
                 "vite": "^6.0.0",

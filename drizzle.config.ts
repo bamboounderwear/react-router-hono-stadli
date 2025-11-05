@@ -1,6 +1,14 @@
-import type { Config } from "drizzle-kit";
+type DrizzleConfig = {
+        schema: string;
+        out: string;
+        dialect: "sqlite";
+        driver: "d1";
+        dbCredentials: {
+                bindingName: string;
+        };
+};
 
-const config: Config = {
+const config: DrizzleConfig = {
         schema: "./drizzle/schema.ts",
         out: "./drizzle/migrations",
         dialect: "sqlite",

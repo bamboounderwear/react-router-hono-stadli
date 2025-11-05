@@ -1,0 +1,16 @@
+{
+        "name": "drizzle-orm",
+        "version": "0.38.4",
+        "description": "Minimal local stub of drizzle-orm used for schema typing in offline development.",
+        "type": "module",
+        "exports": {
+                ".": {
+                        "types": "./index.d.ts",
+                        "default": "./index.js"
+                },
+                "./sqlite-core": {
+                        "types": "./sqlite-core.d.ts",
+                        "default": "./sqlite-core.js"
+                }
+        }
+}
