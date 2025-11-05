@@ -16,25 +16,27 @@
 		"preview_image_url": "https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/56caa8a9-d3ab-4ac6-32a9-6a5fc686e000/preview",
 		"publish": true
 	},
-	"dependencies": {
-		"hono": "4.8.2",
-		"isbot": "5.1.26",
-		"react": "19.0.0",
-		"react-dom": "19.0.0",
-		"react-router": "7.6.3"
-	},
-	"devDependencies": {
-		"@cloudflare/vite-plugin": "1.7.5",
-		"@cloudflare/workers-types": "^4.20250425.0",
-		"@react-router/dev": "7.6.3",
-		"@tailwindcss/vite": "4.1.4",
-		"@types/node": "24.0.4",
-		"@types/react": "19.0.10",
-		"@types/react-dom": "19.0.4",
-		"tailwindcss": "4.1.1",
-		"typescript": "5.8.3",
-		"vite": "^6.0.0",
-		"vite-tsconfig-paths": "5.1.4",
+        "dependencies": {
+                "drizzle-orm": "^0.38.0",
+                "hono": "4.8.2",
+                "isbot": "5.1.26",
+                "react": "19.0.0",
+                "react-dom": "19.0.0",
+                "react-router": "7.6.3"
+        },
+        "devDependencies": {
+                "@cloudflare/vite-plugin": "1.7.5",
+                "@cloudflare/workers-types": "^4.20250425.0",
+                "@react-router/dev": "7.6.3",
+                "@tailwindcss/vite": "4.1.4",
+                "@types/node": "24.0.4",
+                "@types/react": "19.0.10",
+                "@types/react-dom": "19.0.4",
+                "drizzle-kit": "^0.30.0",
+                "tailwindcss": "4.1.1",
+                "typescript": "5.8.3",
+                "vite": "^6.0.0",
+                "vite-tsconfig-paths": "5.1.4",
 		"wrangler": "4.21.x"
 	},
 	"scripts": {

@@ -42,5 +42,11 @@
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
 	 */
 	// "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
-	"upload_source_maps": true
+        "d1_databases": [
+                {
+                        "binding": "stadlidb",
+                        "database_id": "f0d39de0-cb9e-4748-8279-c8d861eaaac8"
+                }
+        ],
+        "upload_source_maps": true
 }
